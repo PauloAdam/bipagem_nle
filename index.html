@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Bipagem</title>
+
+<style>
+body {
+  font-family: Arial;
+  background:#111;
+  color:#fff;
+}
+
+input {
+  font-size:28px;
+  width:100%;
+  padding:15px;
+  margin-bottom:10px;
+}
+
+button {
+  font-size:22px;
+  padding:15px;
+  width:100%;
+  margin-bottom:10px;
+  cursor:pointer;
+}
+
+button:disabled {
+  opacity:0.5;
+  cursor:not-allowed;
+}
+
+pre {
+  background:#000;
+  padding:10px;
+  min-height:150px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Número do Pedido</h2>
+<input id="pedidoInput" placeholder="Digite o número do pedido">
+
+<button id="buscarPedidoBtn" onclick="carregarPedido()">
+  Carregar Pedido
+</button>
+
+<hr>
+
+<h2>Bipar Produto</h2>
+<input id="scanInput" autofocus placeholder="Bipe o código de barras">
+
+<pre id="lista">Nenhum pedido carregado</pre>
+
+<button onclick="finalizar()">Finalizar Separação</button>
+
+<script>
+let pedidoData = {};
+let carregandoPedido = false;
+let ultimoClique = 0;
+
+/* =========================
+   CARREGAR PEDIDO (com debounce)
+========================= */
+async function carregarPedido() {
+
+  // debounce: 1 clique a cada 2s
+  const agora = Date.now();
+  if (agora - ultimoClique < 2000) return;
+  ultimoClique = agora;
+
+  if (carregandoPedido) return;
+
+  const numero = document.getElementById("pedidoInput").value.trim();
+  const botao = document.getElementById("buscarPedidoBtn");
+
+  if (!numero) {
+    alert("Informe o número do pedido");
+    return;
+  }
+
+  carregandoPedido = true;
+  botao.disabled = true;
+  botao.innerText = "Buscando...";
+
+  try {
+    const r = await fetch(`/pedido/${numero}`);
+    const data = await r.json();
+
+    if (!r.ok || data.erro) {
+      throw data;
+    }
+
+    pedidoData = data;
+    render();
+
+  } catch (e) {
+    alert(
+      e?.erro ||
+      e?.error?.message ||
+      "Erro ao buscar pedido"
+    );
+  } finally {
+    carregandoPedido = false;
+    botao.disabled = false;
+    botao.innerText = "Carregar Pedido";
+  }
+}
+
+/* =========================
+   SCAN
+========================= */
+document.getElementById("scanInput").addEventListener("keydown", async e => {
+  if (e.key !== "Enter") return;
+
+  const codigo = e.target.value.trim();
+  if (!codigo) return;
+
+  const r = await fetch("/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo })
+  });
+
+  const data = await r.json();
+
+  if (data.erro) {
+    alert(data.erro);
+  }
+
+  render();
+  e.target.value = "";
+});
+
+/* =========================
+   RENDER
+========================= */
+function render() {
+  const lista = document.getElementById("lista");
+
+  if (!Object.keys(pedidoData).length) {
+    lista.textContent = "Nenhum pedido carregado";
+    return;
+  }
+
+  lista.textContent = Object.values(pedidoData)
+    .map(i => `${i.nome}  ${i.bipado}/${i.pedido}`)
+    .join("\n");
+}
+
+/* =========================
+   FINALIZAR
+========================= */
+async function finalizar(confirmado = false) {
+  const r = await fetch("/finalizar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmado })
+  });
+
+  const data = await r.json();
+
+  if (data.faltantes) {
+    if (confirm("Itens faltantes:\n" + data.faltantes.join("\n"))) {
+      if (confirm("TEM CERTEZA QUE DESEJA FINALIZAR?")) {
+        finalizar(true);
+      }
+    }
+  } else if (data.ok) {
+    alert("Separação finalizada com sucesso");
+    location.reload();
+  } else {
+    alert("Erro ao finalizar");
+  }
+}
+</script>
+
+</body>
+</html>
