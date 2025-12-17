@@ -75,18 +75,17 @@ app.get("/pedido/:numero", async (req, res) => {
     pedidoAtual = {};
     mapaCodigos = {};
 
-    // 3️⃣ Mapear itens (produto único + múltiplos códigos)
+    // 3️⃣ Mapear itens
     for (const i of pedido.itens) {
 
       const idProduto = i.produto.id;
 
-      // cria o produto apenas uma vez
       if (!pedidoAtual[idProduto]) {
         pedidoAtual[idProduto] = {
+          idProduto,
           nome: i.descricao,
           pedido: Number(i.quantidade),
-          bipado: 0,
-          idProduto
+          bipado: 0
         };
       }
 
@@ -95,7 +94,7 @@ app.get("/pedido/:numero", async (req, res) => {
         mapaCodigos[String(i.codigo)] = idProduto;
       }
 
-      // Buscar produto completo (para código de barras / GTIN)
+      // Código de barras / GTIN
       try {
         const prodResp = await api.get(`/produtos/${idProduto}`);
         const p = prodResp.data?.data;
@@ -108,20 +107,16 @@ app.get("/pedido/:numero", async (req, res) => {
           mapaCodigos[String(p.gtin)] = idProduto;
         }
 
-      } catch (err) {
-        console.warn(`⚠️ Erro ao buscar produto ${idProduto}`);
+      } catch {
+        console.warn(`⚠️ Produto ${idProduto} sem dados completos`);
       }
     }
 
-    // Retorna apenas os produtos (sem duplicar)
     res.json(pedidoAtual);
 
   } catch (e) {
     console.error("Erro Bling:", e.response?.data || e.message);
-
-    res.status(500).json({
-      erro: "Erro ao carregar pedido"
-    });
+    res.status(500).json({ erro: "Erro ao carregar pedido" });
 
   } finally {
     blingOcupado = false;
@@ -155,6 +150,18 @@ app.post("/scan", (req, res) => {
    FINALIZAR
 ========================= */
 app.post("/finalizar", async (req, res) => {
+  const { confirmado } = req.body;
+
+  // monta lista de faltantes
+  const faltantes = Object.values(pedidoAtual)
+    .filter(p => p.bipado < p.pedido)
+    .map(p => `${p.nome} – faltaram ${p.pedido - p.bipado}`);
+
+  // se houver faltantes e não confirmado, avisa
+  if (faltantes.length && !confirmado) {
+    return res.json({ faltantes });
+  }
+
   try {
     const api = await bling();
 
@@ -174,6 +181,7 @@ app.post("/finalizar", async (req, res) => {
     res.json({ ok: true });
 
   } catch (e) {
+    console.error("Erro ao finalizar:", e.response?.data || e.message);
     res.status(500).json({ erro: "Erro ao finalizar" });
   }
 });
