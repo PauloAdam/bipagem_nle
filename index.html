@@ -2,89 +2,122 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Bipagem</title>
+<title>Separação de Pedido</title>
 
 <style>
 body {
-  font-family: Arial;
-  background:#111;
-  color:#fff;
+  font-family: Arial, sans-serif;
+  background:#0f172a;
+  color:#e5e7eb;
+  max-width:600px;
+  margin:auto;
+  padding:20px;
+}
+
+h2 {
+  text-align:center;
+}
+
+input, button {
+  width:100%;
+  padding:16px;
+  font-size:18px;
+  margin-bottom:10px;
+  border-radius:8px;
+  border:none;
+  box-sizing:border-box;
 }
 
 input {
-  font-size:28px;
-  width:100%;
-  padding:15px;
-  margin-bottom:10px;
+  background:#020617;
+  color:#fff;
 }
 
 button {
-  font-size:22px;
-  padding:15px;
-  width:100%;
-  margin-bottom:10px;
   cursor:pointer;
 }
 
-button:disabled {
-  opacity:0.5;
-  cursor:not-allowed;
+button.primary {
+  background:#2563eb;
+  color:white;
 }
 
-pre {
-  background:#000;
-  padding:10px;
-  min-height:150px;
+button.success {
+  background:#16a34a;
+  color:white;
+}
+
+.item {
+  background:#020617;
+  padding:14px;
+  border-radius:8px;
+  margin-bottom:10px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.item.active {
+  border:2px solid #38bdf8;
+}
+
+.item.done {
+  opacity:0.5;
+}
+
+.counter {
+  font-size:42px;
+  text-align:center;
+  margin:20px 0;
+}
+
+.badge {
+  font-size:18px;
+}
+
+hr {
+  margin:20px 0;
+  border:0;
+  border-top:1px solid #334155;
 }
 </style>
 </head>
 
 <body>
 
-<h2>Número do Pedido</h2>
-<input id="pedidoInput" placeholder="Digite o número do pedido">
+<h2>Separação de Pedido</h2>
 
-<button id="buscarPedidoBtn" onclick="carregarPedido()">
+<input id="pedidoInput" placeholder="Número do pedido">
+<button class="primary" id="btnPedido" onclick="carregarPedido()">
   Carregar Pedido
 </button>
 
 <hr>
 
-<h2>Bipar Produto</h2>
-<input id="scanInput" autofocus placeholder="Bipe o código de barras">
+<input id="scanInput" autofocus placeholder="Bipe o produto">
 
-<pre id="lista">Nenhum pedido carregado</pre>
+<div id="lista"></div>
+<div id="ativo"></div>
 
-<button onclick="finalizar()">Finalizar Separação</button>
+<button class="success" onclick="finalizarPedido()">Finalizar Pedido</button>
 
 <script>
-let pedidoData = {};
+let pedido = {};
+let produtoAtivo = null;
 let carregandoPedido = false;
-let ultimoClique = 0;
 
 /* =========================
-   CARREGAR PEDIDO (com debounce)
+   CARREGAR PEDIDO
 ========================= */
 async function carregarPedido() {
-
-  // debounce: 1 clique a cada 2s
-  const agora = Date.now();
-  if (agora - ultimoClique < 2000) return;
-  ultimoClique = agora;
-
   if (carregandoPedido) return;
 
-  const numero = document.getElementById("pedidoInput").value.trim();
-  const botao = document.getElementById("buscarPedidoBtn");
-
-  if (!numero) {
-    alert("Informe o número do pedido");
-    return;
-  }
+  const numero = pedidoInput.value.trim();
+  if (!numero) return alert("Informe o número do pedido");
 
   carregandoPedido = true;
-  botao.disabled = true;
-  botao.innerText = "Buscando...";
+  btnPedido.disabled = true;
+  btnPedido.innerText = "Buscando...";
 
   try {
     const r = await fetch(`/pedido/${numero}`);
@@ -94,24 +127,21 @@ async function carregarPedido() {
       throw data;
     }
 
-    pedidoData = data;
+    pedido = data;
+    produtoAtivo = null;
     render();
 
   } catch (e) {
-    alert(
-      e?.erro ||
-      e?.error?.message ||
-      "Erro ao buscar pedido"
-    );
+    alert(e?.erro || "Erro ao buscar pedido");
   } finally {
     carregandoPedido = false;
-    botao.disabled = false;
-    botao.innerText = "Carregar Pedido";
+    btnPedido.disabled = false;
+    btnPedido.innerText = "Carregar Pedido";
   }
 }
 
 /* =========================
-   SCAN
+   SCAN (ATUALIZA ESTADO LOCAL)
 ========================= */
 document.getElementById("scanInput").addEventListener("keydown", async e => {
   if (e.key !== "Enter") return;
@@ -129,51 +159,114 @@ document.getElementById("scanInput").addEventListener("keydown", async e => {
 
   if (data.erro) {
     alert(data.erro);
+    e.target.value = "";
+    return;
   }
 
-  render();
+  // 🔥 sincroniza o contador local
+  pedido[data.idProduto].bipado = data.bipado;
+
+  // define produto ativo ao primeiro scan
+  if (!produtoAtivo) {
+    produtoAtivo = data.idProduto;
+  }
+
   e.target.value = "";
+  render();
 });
+
+/* =========================
+   FINALIZAR ITEM FALTANDO
+========================= */
+function finalizarItem(id) {
+  const p = pedido[id];
+
+  if (p.bipado >= p.pedido) return;
+
+  if (confirm("Realmente deseja finalizar este item faltando?")) {
+    p.bipado = p.pedido;
+    produtoAtivo = null;
+    render();
+  }
+}
+
+/* =========================
+   FINALIZAR PEDIDO
+========================= */
+async function finalizarPedido() {
+
+  const faltantes = Object.values(pedido)
+    .filter(p => p.bipado < p.pedido)
+    .map(p => `${p.nome} (${p.pedido - p.bipado})`);
+
+  if (faltantes.length) {
+    if (!confirm(
+      "Itens faltantes:\n\n" +
+      faltantes.join("\n") +
+      "\n\nDeseja continuar?"
+    )) return;
+  }
+
+  if (!confirm("TEM CERTEZA QUE DESEJA FINALIZAR O PEDIDO?")) return;
+
+  const r = await fetch("/finalizar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmado: true })
+  });
+
+  const data = await r.json();
+
+  if (data.ok) {
+    alert("Separação finalizada com sucesso");
+    location.reload();
+  } else {
+    alert(data.erro || "Erro ao finalizar");
+  }
+}
 
 /* =========================
    RENDER
 ========================= */
 function render() {
-  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  ativo.innerHTML = "";
 
-  if (!Object.keys(pedidoData).length) {
-    lista.textContent = "Nenhum pedido carregado";
-    return;
-  }
+  const itens = Object.values(pedido);
 
-  lista.textContent = Object.values(pedidoData)
-    .map(i => `${i.nome}  ${i.bipado}/${i.pedido}`)
-    .join("\n");
-}
+  if (!produtoAtivo) {
+    itens.forEach(p => {
+      const div = document.createElement("div");
+      div.className =
+        "item " +
+        (p.bipado === p.pedido ? "done" : "");
 
-/* =========================
-   FINALIZAR
-========================= */
-async function finalizar(confirmado = false) {
-  const r = await fetch("/finalizar", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirmado })
-  });
-
-  const data = await r.json();
-
-  if (data.faltantes) {
-    if (confirm("Itens faltantes:\n" + data.faltantes.join("\n"))) {
-      if (confirm("TEM CERTEZA QUE DESEJA FINALIZAR?")) {
-        finalizar(true);
-      }
-    }
-  } else if (data.ok) {
-    alert("Separação finalizada com sucesso");
-    location.reload();
+      div.innerHTML = `
+        <span>${p.nome}</span>
+        <span class="badge">
+          ${p.bipado}/${p.pedido}
+          ${p.bipado === p.pedido ? "✔" : ""}
+        </span>
+      `;
+      lista.appendChild(div);
+    });
   } else {
-    alert("Erro ao finalizar");
+    const p = pedido[produtoAtivo];
+
+    ativo.innerHTML = `
+      <div class="item active">
+        <strong>${p.nome}</strong>
+        <span>${p.bipado}/${p.pedido}</span>
+      </div>
+
+      <div class="counter">
+        ${p.bipado} / ${p.pedido}
+      </div>
+
+      <button class="success" onclick="finalizarItem('${p.idProduto}')">
+        ✔ Finalizar item faltando
+      </button>
+    `;
   }
 }
 </script>
